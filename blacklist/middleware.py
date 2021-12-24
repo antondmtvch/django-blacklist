@@ -59,7 +59,7 @@ class BlacklistMiddleware(MiddlewareMixin):
             if _needs_reload(current_time):
                 _load_addr_whitelist()
                 _load_blacklist()
-                _reset_rule_duration(request)
+                _set_whitelisted_flag(request)
 
             try:
                 _filter_client(request, current_time)
@@ -158,8 +158,8 @@ def _add_rule(rule):
         _addr_blacklist = addr_blacklist
 
 
-def _reset_rule_duration(request):
+def _set_whitelisted_flag(request):
     addr = request.META['REMOTE_ADDR']
     ip = ipaddress.ip_address(addr)
     rules = Rule.objects.filter(address=ip.compressed)
-    rules.update(duration=timedelta(minutes=0), whitelisted=True)
+    rules.update(whitelisted=True)
