@@ -1,7 +1,8 @@
 import ipaddress
 import threading
+import collections
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, Set
 import logging
 
 from django.core.exceptions import SuspiciousOperation
@@ -11,7 +12,7 @@ from django.utils.timezone import now
 from django.shortcuts import render
 from django.conf import settings
 
-from .models import Rule
+from .models import Rule, IPWhitelist
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,24 @@ _RELOAD_PERIOD = timedelta(seconds=getattr(settings, 'BLACKLIST_RELOAD_PERIOD', 
 
 _user_blacklist: Dict[int, datetime] = {}
 _addr_blacklist: Dict[Optional[int], Dict[Union[ipaddress.IPv4Network, ipaddress.IPv6Network], datetime]] = {}
+
+_addr_whitelist: Dict[Optional[int], Set[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]]] = {}
+
+
+def _load_addr_whitelist():
+    global _addr_whitelist
+
+    addr_whitelist = {}
+
+    for addr in IPWhitelist.objects.all():
+        addr = addr.get_network()
+        addresses = addr_whitelist.setdefault(addr.prefixlen, set())
+        addresses.add(addr)
+
+    _addr_whitelist = addr_whitelist
+
+
+_load_addr_whitelist()
 
 _loaded: Optional[datetime] = None
 
@@ -38,7 +57,9 @@ class BlacklistMiddleware(MiddlewareMixin):
             current_time = now()
 
             if _needs_reload(current_time):
+                _load_addr_whitelist()
                 _load_blacklist()
+                _reset_rule_duration(request)
 
             try:
                 _filter_client(request, current_time)
@@ -100,6 +121,9 @@ def _load_blacklist():
                 network = Rule(address=rule['address'], prefixlen=prefixlen).get_network()
                 until = rule['until']
 
+                if network in _addr_whitelist.get(network.prefixlen, set()):
+                    continue
+
                 _add_client(user_blacklist, addr_blacklist, user_id, prefixlen, network, until)
 
             _user_blacklist = user_blacklist
@@ -132,3 +156,10 @@ def _add_rule(rule):
         addr_blacklist = _addr_blacklist.copy()
         _add_client(_user_blacklist, addr_blacklist, user_id, prefixlen, network, until)
         _addr_blacklist = addr_blacklist
+
+
+def _reset_rule_duration(request):
+    addr = request.META['REMOTE_ADDR']
+    ip = ipaddress.ip_address(addr)
+    rules = Rule.objects.filter(address=ip.compressed)
+    rules.update(duration=timedelta(minutes=0), whitelisted=True)

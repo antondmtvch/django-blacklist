@@ -22,8 +22,10 @@ class Rule(models.Model):
 
     comments = models.TextField(max_length=2048, blank=True)
 
+    whitelisted = models.BooleanField(default=False)
+
     def __str__(self):
-        return str(self.id)
+        return str(self.pk)
 
     def get_network(self):
         addr = self.address
@@ -61,3 +63,29 @@ class Rule(models.Model):
 
         if self.user is not None and self.address is not None:
             raise ValidationError('Both user and address provided.')
+
+
+class IPWhitelist(models.Model):
+    address = models.GenericIPAddressField(null=False, blank=False)
+    prefixlen = models.PositiveIntegerField(null=True, blank=True,
+        validators=[validators.MinValueValidator(0), validators.MaxValueValidator(128)])
+
+    class Meta:
+        verbose_name_plural = 'IP Whitelist'
+
+    def get_network(self):
+        addr = self.address
+
+        if addr:
+            if self.prefixlen is not None:
+                addr += f'/{self.prefixlen}'
+            return ipaddress.ip_network(addr, strict=False)
+
+        else:
+            return None
+
+    def save(self, *args, **kwargs):
+        if not self.pk:
+            ip = self.get_network()
+            self.prefixlen = ip.prefixlen
+        super().save(*args, **kwargs)

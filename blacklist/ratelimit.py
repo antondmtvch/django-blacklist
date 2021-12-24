@@ -18,18 +18,21 @@ def blacklist_ratelimited(duration, block=True):
         @wraps(fn)
         def wrapper(request, *args, **kwargs):
             if request.limited:
+                addr_in_whitelist = _addr_in_whitelist(request)
+
                 if getattr(settings, 'BLACKLIST_ENABLE', True) \
                         and getattr(settings, 'BLACKLIST_RATELIMITED_ENABLE', True):
+
                     if user_duration and request.user.is_authenticated:
                         _create_user_rule(request, user_duration)
 
-                    elif ip_duration:
+                    elif ip_duration and not addr_in_whitelist:
                         _create_ip_rule(request, ip_duration)
 
                     else:
                         logger.warning('Unable to blacklist ratelimited client.')
 
-                if block:
+                if block and not addr_in_whitelist:
                     raise Ratelimited()
 
             return fn(request, *args, **kwargs)
@@ -72,3 +75,14 @@ def _create_comments(request):
 def _add_rule(rule):
     rule.save()
     _middleware_add_rule(rule)
+
+
+def _addr_in_whitelist(request) -> bool:
+    from .middleware import _addr_whitelist, _load_addr_whitelist
+
+    _load_addr_whitelist()
+
+    addr = request.META['REMOTE_ADDR']
+    ip = ipaddress.ip_network(addr, strict=False)
+
+    return ip in _addr_whitelist.get(ip.prefixlen, set())
