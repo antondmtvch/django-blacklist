@@ -1,6 +1,5 @@
 import ipaddress
 import threading
-import collections
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Union, Set
 import logging
